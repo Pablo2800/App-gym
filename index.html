@@ -165,6 +165,7 @@ h1 span { color: var(--accent); }
 .wo.running .wo-time strong { color: var(--accent); }
 .wo.finished .wo-time strong { color: var(--done); }
 .swap-box summary::-webkit-details-marker { display: none; }
+#rest-opts .chip { padding: 0 12px; }
 /* Resumen del mes */
 .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
 .stat { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
@@ -368,7 +369,8 @@ const saveWorkouts = () => { try { localStorage.setItem(WO_KEY, JSON.stringify(w
 const fmtDur = ms => { const t = Math.max(0, Math.floor(ms / 1000)), h = Math.floor(t / 3600), m = Math.floor(t / 60) % 60, sec = t % 60; return h ? `${h}:${pad(m)}:${pad(sec)}` : `${m}:${pad(sec)}`; };
 const REST_KEY = "rutina-descanso-v1";
 let restSecs = 90;
-try { restSecs = +localStorage.getItem(REST_KEY) || 90; } catch (e) {}
+// 0 = temporizador desactivado
+try { const v = localStorage.getItem(REST_KEY); if (v !== null && !isNaN(+v)) restSecs = +v; } catch (e) {}
 
 const pad = n => String(n).padStart(2, "0");
 const iso = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -730,6 +732,7 @@ try { navigator.storage?.persist?.(); } catch (e) {}
 let timerEnd = 0, timerTick = null, audioCtx = null;
 const fmtClock = s => `${Math.floor(s / 60)}:${pad(s % 60)}`;
 function startRest(title) {
+  if (!restSecs) return;
   try { audioCtx ??= new (window.AudioContext || window.webkitAudioContext)(); audioCtx.resume?.(); } catch (e) {}
   timerEnd = Date.now() + restSecs * 1000;
   document.getElementById("t-title").textContent = title;
@@ -755,7 +758,7 @@ document.getElementById("t-minus").onclick = () => { if (timerTick) { timerEnd -
 document.getElementById("t-plus").onclick = () => { if (!timerTick) { timerEnd = Date.now(); timerTick = setInterval(tickRest, 250); document.getElementById("timer").classList.remove("end"); } timerEnd += 15000; tickRest(); };
 document.getElementById("t-close").onclick = stopRest;
 function renderRestOpts() {
-  document.getElementById("rest-opts").innerHTML = [60, 90, 120, 180].map(n => `<button class="chip" data-rest="${n}" aria-pressed="${n === restSecs}">${fmtClock(n)}</button>`).join("");
+  document.getElementById("rest-opts").innerHTML = [0, 60, 90, 120, 180].map(n => `<button class="chip" data-rest="${n}" aria-pressed="${n === restSecs}">${n ? fmtClock(n) : "Sin descanso"}</button>`).join("");
   document.querySelectorAll("[data-rest]").forEach(b => b.onclick = () => { restSecs = +b.dataset.rest; try { localStorage.setItem(REST_KEY, restSecs); } catch (e) {} renderRestOpts(); });
 }
 renderRestOpts();
@@ -853,7 +856,7 @@ document.getElementById("bk-restore").onclick = ev => {
   if (data?.app !== "rutina-lmv" || typeof data.log !== "object") return bkMsg("Ese texto no es una copia de esta app.", false);
   if (!restoreArmed) { restoreArmed = true; ev.target.textContent = "Tocá de nuevo para reemplazar todo"; return; }
   restoreArmed = false; ev.target.textContent = "Restaurar";
-  log = data.log || {}; names = data.names || {}; swaps = data.swaps || {}; restSecs = +data.rest || 90; workouts = data.workouts || {}; saveWorkouts();
+  log = data.log || {}; names = data.names || {}; swaps = data.swaps || {}; restSecs = data.rest != null && !isNaN(+data.rest) ? +data.rest : 90; workouts = data.workouts || {}; saveWorkouts();
   ROUTINE = data.routine || DEFAULT_ROUTINE;
   save(); saveNames(); saveSwaps();
   try { data.routine ? saveRoutine() : localStorage.removeItem(ROUTINE_KEY); localStorage.setItem(REST_KEY, restSecs); } catch (e) {}
