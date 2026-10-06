@@ -109,6 +109,9 @@ h1 span { color: var(--accent); }
 .zone[aria-expanded="false"] .chev { transform: translateY(-2px) rotate(45deg); }
 .zone-group { display: flex; flex-direction: column; gap: 10px; }
 .edit-btn { flex: none; width: 34px; height: 34px; border-radius: 10px; border: 0; background: transparent; color: var(--muted); font-size: 17px; cursor: pointer; }
+.note-btn { position: relative; display: grid; place-items: center; }
+.note-btn[aria-expanded="true"], .note-btn.has { color: var(--accent); }
+.note-btn.prev::after, .note-btn.has::after { content: ""; position: absolute; top: 5px; right: 5px; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
 .help-btn { display: grid; place-items: center; text-decoration: none; font: 700 15px var(--font-body); border: 1.5px solid var(--line); border-radius: 50%; width: 30px; height: 30px; }
 .name-input { width: 100%; height: 36px; border-radius: 8px; border: 1px solid var(--accent); background: var(--sunken); color: var(--fg); font: 600 16px var(--font-body); padding: 0 8px; }
 .ex-name small { color: var(--muted); font-size: 13px; }
@@ -543,6 +546,7 @@ function renderDay() {
       <div class="ex-top">
         <button class="check" aria-pressed="${!!e?.done}" aria-label="Marcar ${ex.name} como hecho">✓</button>
         <div class="ex-name"><button class="name-btn" aria-label="Ver progreso de ${escapeHtml(shownName)}"><span>${escapeHtml(shownName)}</span></button>${shownName !== ex.name ? `<small>Original: ${ex.name}</small>` : ex.note ? `<small>${ex.note}</small>` : ""}</div>
+        <button class="edit-btn note-btn${e?.note ? " has" : pn ? " prev" : ""}" aria-expanded="${!!e?.note}" aria-label="Notas de ${escapeHtml(shownName)}${pn && !e?.note ? " (tenés una nota de la vez anterior)" : ""}"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/><path d="M8 13h8M8 17h5"/></svg></button>
         <a class="edit-btn help-btn" href="https://www.youtube.com/results?search_query=${encodeURIComponent("cómo hacer " + shownName + " gimnasio técnica")}" target="_blank" rel="noopener" aria-label="Ver cómo se hace ${escapeHtml(shownName)} (abre YouTube)">?</a>
         <button class="edit-btn" aria-label="Cambiar nombre de ${escapeHtml(shownName)}">✎</button>
       </div>
@@ -554,7 +558,7 @@ function renderDay() {
           <label class="field"><input id="${key}-${ex.id}-${i}-w" inputmode="${ex.timed ? "numeric" : "decimal"}" data-i="${i}" data-f="w" class="${e ? "" : prev?.[i].w ? "pre" : ""}" value="${e ? e.sets[i].w : prev?.[i].w || ""}" placeholder="${prev?.[i].w || "–"}" aria-label="${ex.timed ? "Segundos" : "Peso"} serie ${i + 1}"><em>${ex.timed ? "seg" : "kg"}</em></label>
           <button class="set-check" data-i="${i}" aria-pressed="${!!e?.sets[i].c}" aria-label="Serie ${i + 1} hecha">✓</button>`).join("")}
       </div>
-      <textarea class="ex-note" id="${key}-${ex.id}-note" rows="1" placeholder="${pn ? "Última vez: " + escapeHtml(pn) : "Notas (ej: puedo subir, no había mancuernas más pesadas)"}" aria-label="Notas de ${ex.name}">${escapeHtml(e?.note || "")}</textarea>
+      <textarea class="ex-note" id="${key}-${ex.id}-note" rows="1"${e?.note ? "" : " hidden"} placeholder="${pn ? "Última vez: " + escapeHtml(pn) : "Notas (ej: puedo subir, no había mancuernas más pesadas)"}" aria-label="Notas de ${ex.name}">${escapeHtml(e?.note || "")}</textarea>
       ${prev && !e ? `<small style="color:var(--muted);font-size:12px">Precargado con lo que hiciste la última vez. Cambialo si subiste.</small>` : ""}`;
     card.querySelector(".check").onclick = () => {
       const en = entry(key, ex.id); en.done = !en.done; save(); render();
@@ -567,7 +571,12 @@ function renderDay() {
       save(); render();
     });
     card.querySelector(".name-btn").onclick = () => openProgress(ex, shownName);
-    card.querySelector("button.edit-btn").onclick = () => {
+    card.querySelector(".note-btn").onclick = ev => {
+      const ta = card.querySelector(".ex-note"), btn = ev.currentTarget;
+      ta.hidden = !ta.hidden; btn.setAttribute("aria-expanded", String(!ta.hidden));
+      if (!ta.hidden) ta.focus();
+    };
+    card.querySelector("button.edit-btn:not(.note-btn)").onclick = () => {
       const box = card.querySelector(".ex-name");
       box.innerHTML = `<input class="name-input" id="${key}-${ex.id}-name" value="${escapeHtml(shownName)}" aria-label="Nombre del ejercicio"><small>Vacío vuelve al original. Aplica a este día y los próximos.</small>`;
       const inp = box.querySelector("input"); inp.focus(); inp.select();
