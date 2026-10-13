@@ -169,6 +169,12 @@ h1 span { color: var(--accent); }
 .wo.finished .wo-time strong { color: var(--done); }
 .swap-box summary::-webkit-details-marker { display: none; }
 #rest-opts .chip { padding: 0 12px; }
+.day .rn { position: absolute; top: 3px; right: 5px; font: 600 9px/1 var(--font-data); color: var(--accent); }
+.day.sel .rn { color: var(--accent-fg); }
+.rname-in { width: 100%; height: 44px; border-radius: 10px; border: 1px solid var(--line); background: var(--sunken); color: var(--fg); font: 700 20px var(--font-display); text-transform: uppercase; padding: 0 10px; }
+.fixed-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 15px; }
+.fixed-row select { height: 38px; min-width: 0; max-width: 60%; border-radius: 10px; border: 1px solid var(--line); background: var(--sunken); color: var(--fg); font: 500 15px var(--font-body); padding: 0 8px; }
+.rest .swap { justify-content: center; margin-bottom: 6px; }
 /* Resumen del mes */
 .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
 .stat { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
@@ -220,7 +226,7 @@ body.timing .wrap { padding-bottom: 110px; }
 <div class="wrap">
   <header>
     <h1>Rutina <span id="days-label">L·M·V</span></h1>
-    <div class="head-actions"><span class="eyebrow" id="today-label"></span><button class="btn" id="edit-routine">Editar rutina</button></div>
+    <div class="head-actions"><span class="eyebrow" id="today-label"></span><button class="btn" id="edit-routine">Mis rutinas</button></div>
   </header>
 
   <section id="editor" hidden></section>
@@ -331,13 +337,38 @@ const DEFAULT_ROUTINE = {
     {"id": "piernas-prensa", "zone": "Piernas", "name": "Prensa"},
   ]},
 };
-const ROUTINE_KEY = "rutina-propia-v1";
-let ROUTINE = DEFAULT_ROUTINE;
-try { ROUTINE = JSON.parse(localStorage.getItem(ROUTINE_KEY)) || DEFAULT_ROUTINE; } catch (e) { ROUTINE = DEFAULT_ROUTINE; }
-const saveRoutine = () => { try { localStorage.setItem(ROUTINE_KEY, JSON.stringify(ROUTINE)); } catch (e) {} };
 const WEEK = [1, 2, 3, 4, 5, 6, 0]; // orden lunes a domingo
 const DAY_NAMES = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
 const DAY_LETTERS = ["D", "L", "M", "M", "J", "V", "S"];
+// Rutinas con nombre (Rutina 1, 2, 3…). Cada fecha del calendario puede tener una asignada (plan);
+// los "días fijos" (weekly, opcionales) asignan una rutina sola a ese día de cada semana.
+const ROUTINES_KEY = "rutina-rutinas-v2", PLAN_KEY = "rutina-plan-v2";
+const LEGACY_ROUTINE_KEY = "rutina-propia-v1", LEGACY_SWAP_KEY = "rutina-dias-cambiados-v1";
+// Convierte el formato viejo (una rutina por día de la semana + días cambiados) al nuevo
+function fromLegacy(byWeekday, oldSwaps) {
+  const routines = [], weekly = {}, plan = {}, idOf = {};
+  WEEK.filter(w => byWeekday?.[w]).forEach((w, i) => {
+    const id = "r" + (i + 1);
+    idOf[w] = id; weekly[w] = id;
+    routines.push({ id, name: "Rutina " + (i + 1), exercises: byWeekday[w].exercises.map(ex => ({ ...ex })) });
+  });
+  Object.entries(oldSwaps || {}).forEach(([k, w]) => { if (idOf[w]) plan[k] = idOf[w]; });
+  return { routines, weekly, plan };
+}
+let routines, weekly, plan;
+function loadRoutines() {
+  let st = null, p = null;
+  try { st = JSON.parse(localStorage.getItem(ROUTINES_KEY)); p = JSON.parse(localStorage.getItem(PLAN_KEY)); } catch (e) {}
+  if (st?.routines) { routines = st.routines; weekly = st.weekly || {}; plan = p || {}; return; }
+  let old = null, oldSwaps = null;
+  try { old = JSON.parse(localStorage.getItem(LEGACY_ROUTINE_KEY)); oldSwaps = JSON.parse(localStorage.getItem(LEGACY_SWAP_KEY)); } catch (e) {}
+  ({ routines, weekly, plan } = fromLegacy(old || DEFAULT_ROUTINE, oldSwaps));
+  if (old || oldSwaps) { saveRoutines(); savePlan(); }
+}
+const saveRoutines = () => { try { localStorage.setItem(ROUTINES_KEY, JSON.stringify({ routines, weekly })); } catch (e) {} };
+const savePlan = () => { try { localStorage.setItem(PLAN_KEY, JSON.stringify(plan)); } catch (e) {} };
+const routineById = id => routines.find(r => r.id === id);
+loadRoutines();
 // 4 series con peso progresivo (los colores de disco van de más liviano a más pesado); reps habituales 12-10-10-8
 const SERIES = [
   { reps: 12, plate: "p1" }, { reps: 10, plate: "p2" },
@@ -354,11 +385,6 @@ let names = {};
 try { names = JSON.parse(localStorage.getItem(NAMES_KEY)) || {}; } catch (e) { names = {}; }
 const saveNames = () => { try { localStorage.setItem(NAMES_KEY, JSON.stringify(names)); } catch (e) {} };
 
-// Días en que se hizo otra rutina (fecha -> día de la semana de la rutina usada)
-const SWAP_KEY = "rutina-dias-cambiados-v1";
-let swaps = {};
-try { swaps = JSON.parse(localStorage.getItem(SWAP_KEY)) || {}; } catch (e) { swaps = {}; }
-const saveSwaps = () => { try { localStorage.setItem(SWAP_KEY, JSON.stringify(swaps)); } catch (e) {} };
 // Zonas plegadas por día (fecha|zona -> plegada)
 const FOLDS_KEY = "rutina-zonas-plegadas-v1";
 let folds = {};
@@ -377,20 +403,21 @@ try { const v = localStorage.getItem(REST_KEY); if (v !== null && !isNaN(+v)) re
 
 const pad = n => String(n).padStart(2, "0");
 const iso = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-// Rutina que corresponde a una fecha: la de su día, o la elegida si se cambió
+// Rutina de una fecha: la asignada en el calendario ("rest" = descanso), o la del día fijo
 function routineFor(d) {
-  const sw = swaps[iso(d)];
-  const w = sw != null && ROUTINE[sw] ? +sw : d.getDay();
-  return ROUTINE[w] ? { w, r: ROUTINE[w], swapped: w !== d.getDay() } : null;
+  const p = plan[iso(d)];
+  if (p === "rest") return null;
+  const id = p ?? weekly[d.getDay()];
+  const r = routineById(id);
+  return r ? { id, r, assigned: p != null } : null;
 }
 const isTrain = d => !!routineFor(d);
 const today = new Date(); today.setHours(0, 0, 0, 0);
 
 function nextTrainDay(from) {
   const d = new Date(from);
-  if (!Object.keys(ROUTINE).length) return d;
-  while (!isTrain(d)) d.setDate(d.getDate() + 1);
-  return d;
+  for (let i = 0; i < 400; i++) { if (isTrain(d)) return d; d.setDate(d.getDate() + 1); }
+  return new Date(from); // nada asignado: queda en la fecha pedida
 }
 let selected = nextTrainDay(today);
 let viewYear = selected.getFullYear(), viewMonth = selected.getMonth();
@@ -414,7 +441,7 @@ function dayStatus(d) {
 // Última vez que se cargó ese ejercicio antes de la fecha, para mostrar como referencia
 function currentName(exId) {
   if (names[exId]) return names[exId];
-  for (const d of Object.values(ROUTINE)) { const ex = d.exercises.find(x => x.id === exId); if (ex) return ex.name; }
+  for (const r of routines) { const ex = r.exercises.find(x => x.id === exId); if (ex) return ex.name; }
   return "";
 }
 function lastNote(exId, beforeKey) {
@@ -436,7 +463,7 @@ function renderCalendar() {
   grid.innerHTML = "";
   ["L", "M", "M", "J", "V", "S", "D"].forEach((l, i) => {
     const el = document.createElement("div");
-    el.className = "dow" + (ROUTINE[(i + 1) % 7] ? " train" : "");
+    el.className = "dow" + (routineById(weekly[(i + 1) % 7]) ? " train" : "");
     el.textContent = l; grid.append(el);
   });
   const first = new Date(viewYear, viewMonth, 1);
@@ -449,6 +476,8 @@ function renderCalendar() {
     b.className = "day" + (isTrain(d) ? " train" : "") + (+d === +today ? " today" : "") + (+d === +selected ? " sel" : "");
     b.textContent = n;
     b.setAttribute("aria-label", fmtDay.format(d));
+    const rf = routineFor(d);
+    if (rf) { const t = document.createElement("span"); t.className = "rn"; t.textContent = routines.indexOf(rf.r) + 1; b.append(t); b.setAttribute("aria-label", fmtDay.format(d) + ", " + rf.r.name); }
     const st = dayStatus(d);
     if (st) { const dot = document.createElement("span"); dot.className = "dot " + st; b.append(dot); }
     b.onclick = () => { selected = d; render(); document.getElementById("day").scrollIntoView({ behavior: "smooth", block: "start" }); };
@@ -507,30 +536,33 @@ function renderDay() {
   const r = rf?.r;
   const label = fmtDay.format(selected);
   const key = iso(selected);
-  const ownDay = selected.getDay();
-  const swapChips = (title) => `<div class="swap"><span class="swap-label">${title}</span>${WEEK.filter(n => ROUTINE[n] && n !== rf?.w).map(n => `<button class="chip" data-swap="${n}">${DAY_NAMES[n]}</button>`).join("")}${rf?.swapped ? `<button class="text-btn" data-swap="reset">${ROUTINE[ownDay] ? "Volver a la de " + DAY_NAMES[ownDay].toLowerCase() : "Volver a descanso"}</button>` : ""}</div>`;
-  const bindSwaps = () => box.querySelectorAll("[data-swap]").forEach(b => b.onclick = () => {
-    if (b.dataset.swap === "reset") delete swaps[key]; else swaps[key] = +b.dataset.swap;
-    saveSwaps(); render();
+  const fixedId = routineById(weekly[selected.getDay()]) ? weekly[selected.getDay()] : null;
+  const cur = rf ? rf.id : "rest";
+  const assignChips = (title) => `<div class="swap"><span class="swap-label">${title}</span>${routines.map(x => `<button class="chip" data-assign="${x.id}" aria-pressed="${x.id === cur}">${escapeHtml(x.name)}</button>`).join("")}<button class="chip" data-assign="rest" aria-pressed="${cur === "rest"}">Descanso</button></div>`;
+  const bindAssign = () => box.querySelectorAll("[data-assign]").forEach(b => b.onclick = () => {
+    const v = b.dataset.assign;
+    // Si coincide con el día fijo no hace falta guardarlo aparte
+    if ((v === "rest" && !fixedId) || v === fixedId) delete plan[key]; else plan[key] = v;
+    savePlan(); render();
   });
   if (!r) {
-    box.innerHTML = `<div class="rest"><strong>Descanso</strong>${label.charAt(0).toUpperCase() + label.slice(1)}. No hay rutina este día.<br><button class="text-btn" id="go-next">Ir al próximo entreno →</button>${swapChips("¿Entrenás igual? Elegí qué rutina hacer hoy:")}</div>`;
+    box.innerHTML = `<div class="rest"><strong>Descanso</strong>${label.charAt(0).toUpperCase() + label.slice(1)}. No hay rutina asignada.${routines.length ? assignChips("Elegí qué rutina hacer este día:") : ""}<button class="text-btn" id="go-next">Ir al próximo entreno →</button></div>`;
     document.getElementById("go-next").onclick = () => { selected = nextTrainDay(new Date(selected.getTime() + 864e5)); viewYear = selected.getFullYear(); viewMonth = selected.getMonth(); render(); };
-    bindSwaps();
+    bindAssign();
     return;
   }
   const done = r.exercises.filter(e => log[key]?.[e.id]?.done).length;
   box.innerHTML = `
     <div class="day-head">
       <span class="eyebrow">${label}</span>
-      <h2>${rf.swapped ? "Rutina del " + r.name.toLowerCase() : r.name}</h2>
+      <h2>${escapeHtml(r.name)}</h2>
       <div class="progress"><div class="bar"><div style="width:${done / r.exercises.length * 100}%"></div></div><span>${done}/${r.exercises.length}</span></div>
       ${woHtml(key)}
       <span class="series-key">4 series · 12-10-10-8 reps · peso en subida · tocá un ejercicio para ver tu progreso</span>
-      <details class="swap-box"${rf.swapped ? " open" : ""}><summary class="text-btn" style="list-style:none">${rf.swapped ? "Rutina cambiada para hoy" : "Hacer otra rutina hoy"}</summary>${swapChips("Elegí qué rutina hacer hoy:")}</details>
+      <details class="swap-box"><summary class="text-btn" style="list-style:none">Cambiar la rutina de este día</summary>${assignChips("Rutina de este día:")}</details>
     </div>
     <div class="list"></div>`;
-  bindSwaps();
+  bindAssign();
   bindWo(box, key);
   const list = box.querySelector(".list");
   let lastZone = "", group = null;
@@ -620,7 +652,7 @@ function renderDay() {
 
 function escapeHtml(t) { return String(t).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
 function render() {
-  document.getElementById("days-label").textContent = WEEK.filter(n => ROUTINE[n]).map(n => DAY_LETTERS[n]).join("·");
+  document.getElementById("days-label").textContent = WEEK.filter(n => routineById(weekly[n])).map(n => DAY_LETTERS[n]).join("·");
   renderCalendar(); renderStats(); renderDay();
 }
 
@@ -629,11 +661,10 @@ const ZONES = ["Zona media", "Hombros", "Bíceps", "Tríceps", "Pecho", "Espalda
 let draft = null;
 const newId = () => "ej-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 function openEditor() {
-  draft = { active: new Set(), days: {} };
-  WEEK.forEach(n => {
-    draft.days[n] = (ROUTINE[n]?.exercises || []).map(ex => ({ ...ex, name: currentName(ex.id) }));
-    if (ROUTINE[n]) draft.active.add(n);
-  });
+  draft = {
+    routines: routines.map(r => ({ ...r, exercises: r.exercises.map(ex => ({ ...ex, name: currentName(ex.id) })) })),
+    weekly: { ...weekly }, delArmed: null,
+  };
   showEditor(true); renderEditor();
 }
 function showEditor(on) {
@@ -648,27 +679,34 @@ function showEditor(on) {
 function renderEditor(error = "") {
   const ed = document.getElementById("editor");
   ed.innerHTML = `
-    <h2>Tu rutina</h2>
-    <p class="ed-help">Elegí qué días entrenás y cargá los ejercicios de cada día. Se guarda en este celular; el historial de pesos se mantiene.</p>
-    <div class="day-chips">${WEEK.map(n => `<button class="chip" data-day="${n}" aria-pressed="${draft.active.has(n)}" aria-label="${DAY_NAMES[n]}">${DAY_LETTERS[n]}</button>`).join("")}</div>
+    <h2>Tus rutinas</h2>
+    <p class="ed-help">Armá tus rutinas y asignalas a cada día tocándolo en el calendario. Si entrenás siempre los mismos días, elegí abajo los días fijos y se asignan solas. Se guarda en este celular; el historial de pesos se mantiene.</p>
     <datalist id="zones">${ZONES.map(z => `<option value="${z}">`).join("")}</datalist>
-    ${WEEK.filter(n => draft.active.has(n)).map(n => `
+    ${draft.routines.map((r, ri) => `
       <section class="ed-day">
-        <h3>${DAY_NAMES[n]}</h3>
-        ${draft.days[n].map((ex, i) => `
+        <input type="text" class="rname-in" id="ed-r-${r.id}" data-r="${ri}" data-f="rname" value="${escapeHtml(r.name)}" placeholder="Rutina ${ri + 1}" aria-label="Nombre de la rutina">
+        ${r.exercises.map((ex, i) => `
           <div class="ed-row">
-            <input type="text" id="ed-${n}-${ex.id}-name" data-day="${n}" data-i="${i}" data-f="name" value="${escapeHtml(ex.name)}" placeholder="Nombre del ejercicio" aria-label="Nombre del ejercicio">
+            <input type="text" id="ed-${r.id}-${ex.id}-name" data-r="${ri}" data-i="${i}" data-f="name" value="${escapeHtml(ex.name)}" placeholder="Nombre del ejercicio" aria-label="Nombre del ejercicio">
             <div class="ed-sub">
-              <input type="text" class="zone-in" id="ed-${n}-${ex.id}-zone" list="zones" data-day="${n}" data-i="${i}" data-f="zone" value="${escapeHtml(ex.zone || "")}" placeholder="Zona (pecho, espalda…)" aria-label="Zona">
-              <label><input type="checkbox" data-day="${n}" data-i="${i}" data-f="timed" ${ex.timed ? "checked" : ""} aria-label="Por tiempo (segundos en vez de kg)">Seg</label>
-              <button class="mini" data-act="up" data-day="${n}" data-i="${i}" aria-label="Subir" ${i === 0 ? "disabled" : ""}>↑</button>
-              <button class="mini" data-act="down" data-day="${n}" data-i="${i}" aria-label="Bajar" ${i === draft.days[n].length - 1 ? "disabled" : ""}>↓</button>
-              <button class="mini del" data-act="del" data-day="${n}" data-i="${i}" aria-label="Quitar ejercicio">✕</button>
+              <input type="text" class="zone-in" id="ed-${r.id}-${ex.id}-zone" list="zones" data-r="${ri}" data-i="${i}" data-f="zone" value="${escapeHtml(ex.zone || "")}" placeholder="Zona (pecho, espalda…)" aria-label="Zona">
+              <label><input type="checkbox" data-r="${ri}" data-i="${i}" data-f="timed" ${ex.timed ? "checked" : ""} aria-label="Por tiempo (segundos en vez de kg)">Seg</label>
+              <button class="mini" data-act="up" data-r="${ri}" data-i="${i}" aria-label="Subir" ${i === 0 ? "disabled" : ""}>↑</button>
+              <button class="mini" data-act="down" data-r="${ri}" data-i="${i}" aria-label="Bajar" ${i === r.exercises.length - 1 ? "disabled" : ""}>↓</button>
+              <button class="mini del" data-act="del" data-r="${ri}" data-i="${i}" aria-label="Quitar ejercicio">✕</button>
             </div>
           </div>`).join("")}
-        <button class="text-btn" data-act="add" data-day="${n}">+ Agregar ejercicio</button>
+        <div class="row" style="justify-content:space-between">
+          <button class="text-btn" data-act="add" data-r="${ri}">+ Agregar ejercicio</button>
+          <button class="text-btn" style="color:var(--plate-3)" data-act="delr" data-r="${ri}">${draft.delArmed === r.id ? "Tocá de nuevo para borrarla" : "Borrar rutina"}</button>
+        </div>
       </section>`).join("")}
-    ${draft.active.size ? "" : `<div class="rest"><strong>Sin días</strong>Tocá los días que entrenás para empezar.</div>`}
+    <button class="btn" data-act="addr">+ Nueva rutina</button>
+    <section class="ed-day">
+      <h3>Días fijos</h3>
+      <p class="ed-help">Opcional. La rutina elegida se asigna sola a ese día todas las semanas; igual podés cambiar cualquier día desde el calendario.</p>
+      ${WEEK.map(w => `<label class="fixed-row"><span>${DAY_NAMES[w]}</span><select data-w="${w}" id="ed-fixed-${w}" aria-label="Rutina fija del ${DAY_NAMES[w].toLowerCase()}"><option value="">Sin rutina fija</option>${draft.routines.map((r, ri) => `<option value="${r.id}"${draft.weekly[w] === r.id ? " selected" : ""}>${escapeHtml(r.name || "Rutina " + (ri + 1))}</option>`).join("")}</select></label>`).join("")}
+    </section>
     <div style="display:flex;gap:16px;flex-wrap:wrap">
       <button class="text-btn" data-act="empty">Empezar de cero</button>
       <button class="text-btn" data-act="default">Usar la rutina de Pablo</button>
@@ -676,45 +714,65 @@ function renderEditor(error = "") {
     ${error ? `<p class="ed-error">${error}</p>` : ""}
     <div class="ed-actions">
       <button class="btn ghost" data-act="cancel">Cancelar</button>
-      <button class="btn primary" data-act="save">Guardar rutina</button>
+      <button class="btn primary" data-act="save">Guardar rutinas</button>
     </div>`;
 }
-document.getElementById("editor").addEventListener("input", ev => {
-  const t = ev.target; if (!t.dataset.f) return;
-  const ex = draft.days[t.dataset.day][+t.dataset.i];
+const editorEl = document.getElementById("editor");
+editorEl.addEventListener("input", ev => {
+  const t = ev.target;
+  if (t.dataset.w != null) { if (t.value) draft.weekly[t.dataset.w] = t.value; else delete draft.weekly[t.dataset.w]; return; }
+  if (!t.dataset.f) return;
+  const r = draft.routines[+t.dataset.r];
+  if (t.dataset.f === "rname") { r.name = t.value; return; }
+  const ex = r.exercises[+t.dataset.i];
   ex[t.dataset.f] = t.type === "checkbox" ? t.checked : t.value;
 });
-document.getElementById("editor").addEventListener("click", ev => {
+editorEl.addEventListener("click", ev => {
   const b = ev.target.closest("button"); if (!b) return;
-  const n = b.dataset.day, i = +b.dataset.i, list = n != null ? draft.days[n] : null;
-  if (b.classList.contains("chip")) { const d = +n; draft.active.has(d) ? draft.active.delete(d) : draft.active.add(d); }
-  else if (b.dataset.act === "add") {
+  const ri = +b.dataset.r, i = +b.dataset.i, r = draft.routines[ri], list = r?.exercises;
+  const act = b.dataset.act;
+  if (act !== "delr") draft.delArmed = null;
+  if (act === "add") {
     list.push({ id: newId(), zone: list[list.length - 1]?.zone || "", name: "" });
     renderEditor();
-    const rows = document.querySelectorAll(`.ed-row input[data-day="${n}"][data-f="name"]`); rows[rows.length - 1]?.focus();
+    const rows = editorEl.querySelectorAll(`.ed-row input[data-r="${ri}"][data-f="name"]`); rows[rows.length - 1]?.focus();
     return;
   }
-  else if (b.dataset.act === "del") list.splice(i, 1);
-  else if (b.dataset.act === "up") [list[i - 1], list[i]] = [list[i], list[i - 1]];
-  else if (b.dataset.act === "down") [list[i + 1], list[i]] = [list[i], list[i + 1]];
-  else if (b.dataset.act === "empty") { WEEK.forEach(d => draft.days[d] = []); }
-  else if (b.dataset.act === "default") { draft.active = new Set(); WEEK.forEach(d => { draft.days[d] = (DEFAULT_ROUTINE[d]?.exercises || []).map(ex => ({ ...ex })); if (DEFAULT_ROUTINE[d]) draft.active.add(d); }); }
-  else if (b.dataset.act === "cancel") { draft = null; showEditor(false); render(); return; }
-  else if (b.dataset.act === "save") {
-    if (!draft.active.size) return renderEditor("Elegí al menos un día de entreno.");
-    const next = {};
-    for (const d of WEEK.filter(d => draft.active.has(d))) {
-      const exercises = draft.days[d].filter(ex => ex.name.trim()).map(ex => {
+  else if (act === "del") list.splice(i, 1);
+  else if (act === "up") [list[i - 1], list[i]] = [list[i], list[i - 1]];
+  else if (act === "down") [list[i + 1], list[i]] = [list[i], list[i + 1]];
+  else if (act === "addr") {
+    const n = draft.routines.length + 1;
+    draft.routines.push({ id: "r" + Date.now().toString(36), name: "Rutina " + n, exercises: [{ id: newId(), zone: "", name: "" }] });
+    renderEditor();
+    editorEl.querySelectorAll(".rname-in")[n - 1]?.scrollIntoView({ block: "center" });
+    return;
+  }
+  else if (act === "delr") {
+    if (draft.delArmed !== r.id) { draft.delArmed = r.id; }
+    else { draft.routines.splice(ri, 1); Object.keys(draft.weekly).forEach(w => { if (draft.weekly[w] === r.id) delete draft.weekly[w]; }); draft.delArmed = null; }
+  }
+  else if (act === "empty") { draft.routines = [{ id: "r" + Date.now().toString(36), name: "Rutina 1", exercises: [{ id: newId(), zone: "", name: "" }] }]; draft.weekly = {}; }
+  else if (act === "default") { const d = fromLegacy(DEFAULT_ROUTINE, null); draft.routines = d.routines; draft.weekly = d.weekly; }
+  else if (act === "cancel") { draft = null; showEditor(false); render(); return; }
+  else if (act === "save") {
+    if (!draft.routines.length) return renderEditor("Armá al menos una rutina.");
+    const next = [];
+    for (const [k, x] of draft.routines.entries()) {
+      const name = x.name.trim() || "Rutina " + (k + 1);
+      const exercises = x.exercises.filter(ex => ex.name.trim()).map(ex => {
         const o = { id: ex.id, zone: (ex.zone || "").trim() || "Otros", name: ex.name.trim() };
         if (ex.timed) o.timed = true;
         if (ex.note) o.note = ex.note;
         return o;
       });
-      if (!exercises.length) return renderEditor(`${DAY_NAMES[d]} no tiene ejercicios. Agregá alguno o desmarcá el día.`);
-      next[d] = { name: DAY_NAMES[d], exercises };
+      if (!exercises.length) return renderEditor(`${escapeHtml(name)} no tiene ejercicios. Agregá alguno o borrala.`);
+      next.push({ id: x.id, name, exercises });
       exercises.forEach(ex => delete names[ex.id]); // el nombre editado pasa a ser el de la rutina
     }
-    ROUTINE = next; saveRoutine(); saveNames();
+    routines = next; weekly = draft.weekly;
+    Object.keys(plan).forEach(k => { if (plan[k] !== "rest" && !routineById(plan[k])) delete plan[k]; }); // rutinas borradas
+    saveRoutines(); savePlan(); saveNames();
     draft = null; showEditor(false);
     selected = nextTrainDay(today); viewYear = selected.getFullYear(); viewMonth = selected.getMonth();
     render(); return;
@@ -844,8 +902,7 @@ function drawChart(box, h, unit) {
 
 // ---- Copia de seguridad ----
 function backupText() {
-  let custom = null; try { custom = JSON.parse(localStorage.getItem(ROUTINE_KEY)); } catch (e) {}
-  return JSON.stringify({ app: "rutina-lmv", v: 1, fecha: iso(today), log, names, routine: custom, swaps, rest: restSecs, workouts });
+  return JSON.stringify({ app: "rutina-lmv", v: 2, fecha: iso(today), log, names, routines, weekly, plan, rest: restSecs, workouts });
 }
 const bkMsg = (t, ok) => { const m = document.getElementById("bk-msg"); m.textContent = t; m.className = "msg " + (ok ? "ok" : "err"); };
 document.getElementById("bk-copy").onclick = () => {
@@ -865,10 +922,12 @@ document.getElementById("bk-restore").onclick = ev => {
   if (data?.app !== "rutina-lmv" || typeof data.log !== "object") return bkMsg("Ese texto no es una copia de esta app.", false);
   if (!restoreArmed) { restoreArmed = true; ev.target.textContent = "Tocá de nuevo para reemplazar todo"; return; }
   restoreArmed = false; ev.target.textContent = "Restaurar";
-  log = data.log || {}; names = data.names || {}; swaps = data.swaps || {}; restSecs = data.rest != null && !isNaN(+data.rest) ? +data.rest : 90; workouts = data.workouts || {}; saveWorkouts();
-  ROUTINE = data.routine || DEFAULT_ROUTINE;
-  save(); saveNames(); saveSwaps();
-  try { data.routine ? saveRoutine() : localStorage.removeItem(ROUTINE_KEY); localStorage.setItem(REST_KEY, restSecs); } catch (e) {}
+  log = data.log || {}; names = data.names || {}; restSecs = data.rest != null && !isNaN(+data.rest) ? +data.rest : 90; workouts = data.workouts || {}; saveWorkouts();
+  // Copias nuevas traen rutinas y plan; las viejas (v1) se convierten
+  if (data.routines) { routines = data.routines; weekly = data.weekly || {}; plan = data.plan || {}; }
+  else ({ routines, weekly, plan } = fromLegacy(data.routine || DEFAULT_ROUTINE, data.swaps));
+  save(); saveNames(); saveRoutines(); savePlan();
+  try { localStorage.setItem(REST_KEY, restSecs); } catch (e) {}
   document.getElementById("bk-in").value = "";
   renderRestOpts(); selected = nextTrainDay(today); viewYear = selected.getFullYear(); viewMonth = selected.getMonth(); render();
   bkMsg(`Listo, restauré ${Object.keys(log).length} días de registros.`, true);
